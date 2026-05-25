@@ -1,0 +1,97 @@
+package server
+
+import (
+	"errors"
+
+	"github.com/gin-contrib/cors"
+	"google.golang.org/grpc"
+)
+
+// ErrAddrMissing is returned by Start when a listener was registered
+// without a bind address or socket path. Use WithAddr to supply the address
+// as a lazy-evaluated option so that flag values are resolved at start time.
+var ErrAddrMissing = errors.New("listener addr missing")
+
+// listenerConfig describes a single listen endpoint.
+// It is constructed exclusively via ListenerOption functions and is not
+// exported; callers use WithTCPListener or WithUnixListener instead.
+type listenerConfig struct {
+	addr        string
+	network     string // "tcp" (default) or "unix"
+	tlsCertPath string
+	tlsKeyPath  string
+}
+
+// ListenerOption configures a single listener endpoint.
+type ListenerOption func(*listenerConfig)
+
+// WithAddr sets the listen address (or Unix socket path) by calling fn at the
+// time the Option is applied, allowing the value to be sourced from a flag or
+// other late-bound configuration. WithAddr must be supplied to WithTCPListener
+// or WithUnixListener; omitting it leaves the address empty, which Start will
+// reject with an error.
+func WithAddr(fn func() string) ListenerOption {
+	return func(lc *listenerConfig) {
+		lc.addr = fn()
+	}
+}
+
+// WithTLSCert enables TLS on the listener using the given certificate and key
+// files. Both paths must be non-empty; omitting this option leaves the
+// listener in plain-text mode.
+func WithTLSCert(certPath, keyPath string) ListenerOption {
+	return func(lc *listenerConfig) {
+		lc.tlsCertPath = certPath
+		lc.tlsKeyPath = keyPath
+	}
+}
+
+// Option configures an HTTP server.
+type Option func(*options)
+
+type options struct {
+	grpc       *grpc.Server
+	listeners  []listenerConfig
+	corsConfig *cors.Config
+}
+
+// CORSOption adjusts a cors.Config before it is applied to the server.
+// Use with WithDefaultCORSConfig to override individual fields of the
+// default policy.
+type CORSOption func(*cors.Config)
+
+// WithGRPCServer attaches a gRPC server to the shared H2C handler.
+// Inbound requests whose Content-Type starts with "application/grpc"
+// are routed to the gRPC server; all other requests go to Gin.
+func WithGRPCServer(s *grpc.Server) Option {
+	return func(o *options) {
+		o.grpc = s
+	}
+}
+
+// WithTCPListener appends a TCP listener. Use WithAddr to specify the bind
+// address and WithTLSCert to enable TLS. WithAddr must be provided; Start
+// returns an error if the address is empty when the server is started.
+func WithTCPListener(opts ...ListenerOption) Option {
+	return func(o *options) {
+		lc := listenerConfig{network: "tcp"}
+		for _, opt := range opts {
+			opt(&lc)
+		}
+		o.listeners = append(o.listeners, lc)
+	}
+}
+
+// WithUnixListener appends a Unix domain socket listener. Use WithAddr to
+// specify the socket path and WithTLSCert to enable TLS. WithAddr must be
+// provided; Start returns an error if the path is empty when the server is
+// started.
+func WithUnixListener(opts ...ListenerOption) Option {
+	return func(o *options) {
+		lc := listenerConfig{network: "unix"}
+		for _, opt := range opts {
+			opt(&lc)
+		}
+		o.listeners = append(o.listeners, lc)
+	}
+}
