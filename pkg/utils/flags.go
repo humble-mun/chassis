@@ -15,13 +15,13 @@ const (
 
 // RegisterToViper registers flags to viper and returns a function to load config
 func RegisterToViper(pfs *pflag.FlagSet, configName string) func() error {
-	viper.SetConfigName(configName)
-	viper.SetConfigType(configFileType)
-	viper.AddConfigPath("/etc/humble-mun")
-	for _, configPath := range extraConfigPaths {
-		viper.AddConfigPath(configPath)
-	}
 	return func() (err error) {
+		viper.SetConfigName(configName)
+		viper.SetConfigType(configFileType)
+		viper.AddConfigPath("/etc/humble-mun")
+		for _, configPath := range extraConfigPaths {
+			viper.AddConfigPath(configPath)
+		}
 		if err = viper.ReadInConfig(); err != nil {
 			if _, ok := errors.AsType[viper.ConfigFileNotFoundError](err); !ok {
 				return
