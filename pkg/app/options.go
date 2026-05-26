@@ -10,14 +10,25 @@ import (
 type Option func(*options)
 
 type options struct {
-	init          func() error
-	serverOptions []server.Option
+	init              func() error
+	withoutHTTPServer bool
+	serverOptions     []server.Option
 }
 
 // WithInit sets the viper initialization function produced by PrepareFlags.
 func WithInit(init func() error) Option {
 	return func(o *options) {
 		o.init = init
+	}
+}
+
+// WithoutHTTPServer skips HTTP server construction and route registration.
+//
+// When set, BaseContext returns nil for httpGin. Server-related options such as
+// WithGRPCServer, WithTCPListener, and WithUnixListener are ignored.
+func WithoutHTTPServer() Option {
+	return func(o *options) {
+		o.withoutHTTPServer = true
 	}
 }
 

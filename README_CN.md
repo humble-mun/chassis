@@ -12,7 +12,7 @@ chassis 提供从 humble-mun 平台中提炼出的通用构建模块,让多个�
 
 | 包 | 说明 |
 |---------|-------------|
-| `pkg/app` | 应用启动引导模式(flag 注册、配置加载、HTTP server 初始化、信号处理) |
+| `pkg/app` | 应用启动引导模式(flag 注册、配置加载、可选 HTTP server 初始化、信号处理) |
 | `pkg/logging` | 基于 klog 的 logger 初始化与工厂 |
 | `pkg/manager` | controller-runtime manager 启动引导(flag 注册、client QPS/burst、leader 选举、scheme 注册) |
 | `pkg/metrics` | Prometheus 指标注册表与 `/metrics` 端点 |
@@ -49,11 +49,12 @@ httpServer.RegisterRoute(utils.APIVersion("/api/v1")(
 `BaseContext` 接受函数式选项(functional options):
 
 - `app.WithInit(fn)` - 设置由 `PrepareFlags` 返回的 viper 初始化函数
+- `app.WithoutHTTPServer()` - 跳过 HTTP server 构造和路由注册;`BaseContext` 返回的 `httpServer` 为 `nil`,并忽略 server 相关选项
 - `app.WithGRPCServer(s)` - 挂载一个 gRPC server;`Content-Type: application/grpc` 的请求会被路由到该 server
 - `app.WithTCPListener(...server.ListenerOption)` - 添加一个 TCP 监听器;用 `server.WithAddr(fn)` 提供绑定地址,用 `server.WithTLSCert(cert, key)` 启用 TLS
 - `app.WithUnixListener(...server.ListenerOption)` - 添加一个 Unix domain socket 监听器;用 `server.WithAddr(fn)` 提供 socket 路径
 
-`BaseContext` 会自动在最前面加入 `server.WithDefaultListener()` 和 `server.WithDefaultCORSConfig()`,因此除非显式覆盖,基于 flag 的默认配置始终生效。
+启用 HTTP server 构造时,`BaseContext` 会自动在最前面加入 `server.WithDefaultListener()` 和 `server.WithDefaultCORSConfig()`,因此除非显式覆盖,基于 flag 的默认配置始终生效。
 
 ## 构建
 

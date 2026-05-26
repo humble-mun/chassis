@@ -19,7 +19,7 @@ chassis is a shared infrastructure toolkit for humble-mun microservices. It prov
 | `pkg/service` | Common infrastructure constants (flag names, defaults) | stdlib only |
 | `pkg/server` | HTTP/gRPC server with Gin: multi-listener (TCP + Unix socket), TLS per listener, CORS, H2C via standard library, graceful shutdown, request logging | gin, cors, grpc, errgroup, metrics, service, utils |
 | `pkg/manager` | controller-runtime manager bootstrap (flags, client QPS/burst, leader election, scheme registration) | controller-runtime, viper, pflag, logr, service |
-| `pkg/app` | Application bootstrap (PrepareFlags + BaseContext); BaseContext returns `*server.HTTPServer` and accepts functional options | all above packages, cobra, controller-runtime |
+| `pkg/app` | Application bootstrap (PrepareFlags + BaseContext); BaseContext returns optional `*server.HTTPServer` and accepts functional options | all above packages, cobra, controller-runtime |
 
 ### Internal Dependency Graph
 
@@ -44,11 +44,12 @@ Consumers should set these variables before calling `app.BaseContext()`:
 `BaseContext` accepts functional options:
 
 - `app.WithInit(fn)` - sets the viper initialization function returned by `PrepareFlags`
+- `app.WithoutHTTPServer()` - skips HTTP server construction and route registration; `BaseContext` returns `nil` for `httpGin`, and server-related options are ignored
 - `app.WithGRPCServer(s)` - attaches a gRPC server; requests with `Content-Type: application/grpc` are routed to it
 - `app.WithTCPListener(...ListenerOption)` - adds a TCP listener; use `server.WithAddr(fn)` to supply the bind address and `server.WithTLSCert(cert, key)` to enable TLS
 - `app.WithUnixListener(...ListenerOption)` - adds a Unix domain socket listener; use `server.WithAddr(fn)` to supply the socket path
 
-`BaseContext` prepends `server.WithDefaultListener()` and `server.WithDefaultCORSConfig()` automatically, so flag-driven defaults are always active unless overridden.
+When HTTP server construction is enabled, `BaseContext` prepends `server.WithDefaultListener()` and `server.WithDefaultCORSConfig()` automatically, so flag-driven defaults are always active unless overridden.
 
 ## Health Probes
 
@@ -114,4 +115,3 @@ golangci-lint-v2 run -c .golangci.yaml ./...
 
 - **Vendor mode**: use `go mod vendor` to manage dependencies
 - **klog replace**: `k8s.io/klog/v2 => github.com/tedli/klog/v2` (custom fork)
-

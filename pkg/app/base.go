@@ -37,7 +37,7 @@ func PrepareFlags(name string, cmd *cobra.Command, register ...func(*pflag.FlagS
 	return
 }
 
-// BaseContext create the initial state including a gin server
+// BaseContext create the initial state and optionally a gin server.
 func BaseContext(opts ...Option) (
 	rootLogger, logger logr.Logger, httpGin *server.HTTPServer, ctx context.Context, nodeName string, err error) {
 
@@ -60,6 +60,11 @@ func BaseContext(opts ...Option) (
 
 	nodeName = viper.GetString(service.FlagNodeName)
 	logger = logger.WithValues("nodeName", nodeName)
+	ctx = ctrl.SetupSignalHandler()
+
+	if o.withoutHTTPServer {
+		return
+	}
 
 	serverOpts := append([]server.Option{server.WithDefaultListener(), server.WithDefaultCORSConfig()}, o.serverOptions...)
 	httpGin = server.NewHTTPServer(rootLogger, serverOpts...)
@@ -82,6 +87,5 @@ func BaseContext(opts ...Option) (
 		}))
 	}
 
-	ctx = ctrl.SetupSignalHandler()
 	return
 }

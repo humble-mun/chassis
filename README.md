@@ -12,7 +12,7 @@ chassis provides common building blocks extracted from the humble-mun platform, 
 
 | Package | Description |
 |---------|-------------|
-| `pkg/app` | Application bootstrap pattern (flag registration, config loading, HTTP server initialization, signal handling) |
+| `pkg/app` | Application bootstrap pattern (flag registration, config loading, optional HTTP server initialization, signal handling) |
 | `pkg/logging` | klog-based logger initialization and factory |
 | `pkg/manager` | controller-runtime manager bootstrap (flag registration, client QPS/burst, leader election, scheme registration) |
 | `pkg/metrics` | Prometheus metric registry and `/metrics` endpoint |
@@ -49,11 +49,12 @@ httpServer.RegisterRoute(utils.APIVersion("/api/v1")(
 `BaseContext` accepts functional options:
 
 - `app.WithInit(fn)` - sets the viper initialization function returned by `PrepareFlags`
+- `app.WithoutHTTPServer()` - skips HTTP server construction and route registration; `BaseContext` returns `nil` for `httpServer`, and server-related options are ignored
 - `app.WithGRPCServer(s)` - attaches a gRPC server; requests with `Content-Type: application/grpc` are routed to it
 - `app.WithTCPListener(...server.ListenerOption)` - adds a TCP listener; use `server.WithAddr(fn)` to supply the bind address and `server.WithTLSCert(cert, key)` to enable TLS
 - `app.WithUnixListener(...server.ListenerOption)` - adds a Unix domain socket listener; use `server.WithAddr(fn)` to supply the socket path
 
-`BaseContext` prepends `server.WithDefaultListener()` and `server.WithDefaultCORSConfig()` automatically, so flag-driven defaults are always active unless overridden.
+When HTTP server construction is enabled, `BaseContext` prepends `server.WithDefaultListener()` and `server.WithDefaultCORSConfig()` automatically, so flag-driven defaults are always active unless overridden.
 
 ## Build
 
