@@ -30,6 +30,7 @@ func PrepareFlags(name string, cmd *cobra.Command, register ...func(*pflag.FlagS
 	pfs.String(service.FlagNodeName, "", "The node name that current agent serving on.")
 	pfs.Bool(service.FlagEnablePProf, false, "Whether to enable pprof api.")
 	server.RegisterFlags(pfs)
+	metrics.RegisterFlags(pfs)
 	for _, f := range register {
 		f(pfs)
 	}
