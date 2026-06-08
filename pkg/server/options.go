@@ -16,10 +16,12 @@ var ErrAddrMissing = errors.New("listener addr missing")
 // It is constructed exclusively via ListenerOption functions and is not
 // exported; callers use WithTCPListener or WithUnixListener instead.
 type listenerConfig struct {
-	addr        string
-	network     string // "tcp" (default) or "unix"
-	tlsCertPath string
-	tlsKeyPath  string
+	addr          string
+	network       string // "tcp" (default) or "unix"
+	tlsCertPath   string
+	tlsKeyPath    string
+	clientCAPath  string
+	tlsMinVersion uint16 // 0 means use the crypto/tls default
 }
 
 // ListenerOption configures a single listener endpoint.
@@ -43,6 +45,26 @@ func WithTLSCert(certPath, keyPath string) ListenerOption {
 	return func(lc *listenerConfig) {
 		lc.tlsCertPath = certPath
 		lc.tlsKeyPath = keyPath
+	}
+}
+
+// WithMTLS enables mutual TLS on the listener, verifying client certificates
+// against the CA bundle at clientCAPath. The server certificate and key must
+// also be provided via WithTLSCert; mTLS has no effect on a plaintext listener.
+func WithMTLS(clientCAPath string) ListenerOption {
+	return func(lc *listenerConfig) {
+		lc.clientCAPath = clientCAPath
+	}
+}
+
+// WithTLSMinVersion sets the minimum accepted TLS version on the listener,
+// using the crypto/tls version constants (for example tls.VersionTLS12 or
+// tls.VersionTLS13). It has no effect on a plaintext listener. When omitted,
+// the crypto/tls default minimum version applies, except on mTLS listeners
+// which always negotiate TLS 1.3 or higher.
+func WithTLSMinVersion(version uint16) ListenerOption {
+	return func(lc *listenerConfig) {
+		lc.tlsMinVersion = version
 	}
 }
 

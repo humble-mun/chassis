@@ -3,10 +3,12 @@ package server
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -131,7 +133,7 @@ func (h HTTPServer) serveOne(srv *http.Server, lc listenerConfig) (err error) {
 	}()
 	if lc.tlsCertPath != "" && lc.tlsKeyPath != "" {
 		var tlsCfg *tls.Config
-		tlsCfg, err = tlsConfig(lc.tlsCertPath, lc.tlsKeyPath)
+		tlsCfg, err = tlsConfig(lc)
 		if err != nil {
 			logger.Error(err, "load TLS config failed")
 			return
@@ -161,14 +163,35 @@ func networkOf(lc listenerConfig) string {
 	return "tcp"
 }
 
-// tlsConfig loads a TLS certificate and key and returns a minimal tls.Config.
-func tlsConfig(certPath, keyPath string) (cfg *tls.Config, err error) {
+// tlsConfig loads the server certificate and key from lc and returns a
+// tls.Config. When lc.clientCAPath is set it additionally enables mutual TLS,
+// requiring and verifying client certificates against that CA bundle. An
+// explicit lc.tlsMinVersion overrides the default minimum TLS version.
+func tlsConfig(lc listenerConfig) (cfg *tls.Config, err error) {
 	var cert tls.Certificate
-	cert, err = tls.LoadX509KeyPair(certPath, keyPath)
+	cert, err = tls.LoadX509KeyPair(lc.tlsCertPath, lc.tlsKeyPath)
 	if err != nil {
 		return
 	}
 	cfg = &tls.Config{Certificates: []tls.Certificate{cert}}
+	if lc.clientCAPath != "" {
+		var caPEM []byte
+		if caPEM, err = os.ReadFile(lc.clientCAPath); err != nil {
+			err = fmt.Errorf("read client CA %q: %w", lc.clientCAPath, err)
+			return
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(caPEM) {
+			err = fmt.Errorf("parse client CA from %q", lc.clientCAPath)
+			return
+		}
+		cfg.ClientCAs = pool
+		cfg.ClientAuth = tls.RequireAndVerifyClientCert
+		cfg.MinVersion = tls.VersionTLS13 // mTLS branch only, does not affect the default listener
+	}
+	if lc.tlsMinVersion != 0 {
+		cfg.MinVersion = lc.tlsMinVersion
+	}
 	return
 }
 
