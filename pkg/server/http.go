@@ -213,6 +213,13 @@ func tlsConfig(rl resolvedListener) (cfg *tls.Config, err error) {
 		return
 	}
 	cfg = &tls.Config{Certificates: []tls.Certificate{cert}}
+	// Advertise ALPN protocols so HTTP/2 (and thus gRPC) can be negotiated over
+	// TLS. The Go http2 server only injects "h2" automatically when it builds the
+	// TLS listener itself; here we wrap the listener with our own tls.Config, so we
+	// must set NextProtos explicitly. gRPC clients (>= grpc-go 1.67) enforce that
+	// "h2" was negotiated and otherwise fail with "missing selected ALPN property".
+	// "http/1.1" is kept as a fallback so plain REST/Gin traffic still works.
+	cfg.NextProtos = []string{"h2", "http/1.1"}
 	if rl.clientCAPath != "" {
 		var caPEM []byte
 		if caPEM, err = os.ReadFile(rl.clientCAPath); err != nil {
