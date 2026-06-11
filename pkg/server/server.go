@@ -31,9 +31,9 @@ func RegisterFlags(pfs *pflag.FlagSet) {
 func WithDefaultListener() Option {
 	return func(o *options) {
 		o.listeners = append(o.listeners, listenerConfig{
-			addr:        viper.GetString(flagHTTPBindAddress),
-			tlsCertPath: viper.GetString(flagTLSCertPath),
-			tlsKeyPath:  viper.GetString(flagTLSKeyPath),
+			addrFn:     func() string { return viper.GetString(flagHTTPBindAddress) },
+			tlsCertFn:  func() string { return viper.GetString(flagTLSCertPath) },
+			tlsKeyFn:   func() string { return viper.GetString(flagTLSKeyPath) },
 		})
 	}
 }

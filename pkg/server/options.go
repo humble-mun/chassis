@@ -15,45 +15,54 @@ var ErrAddrMissing = errors.New("listener addr missing")
 // listenerConfig describes a single listen endpoint.
 // It is constructed exclusively via ListenerOption functions and is not
 // exported; callers use WithTCPListener or WithUnixListener instead.
+//
+// The addr/TLS path fields are stored as func() string providers rather than
+// plain strings so that their values are resolved lazily at Start time. This
+// matters because options are applied (in BaseContext) before the viper
+// configuration loader runs, so reading flag values eagerly here would yield
+// empty strings. Start resolves each provider once just before serving.
 type listenerConfig struct {
-	addr          string
+	addrFn        func() string
 	network       string // "tcp" (default) or "unix"
-	tlsCertPath   string
-	tlsKeyPath    string
-	clientCAPath  string
+	tlsCertFn     func() string
+	tlsKeyFn      func() string
+	clientCAFn    func() string
 	tlsMinVersion uint16 // 0 means use the crypto/tls default
 }
 
 // ListenerOption configures a single listener endpoint.
 type ListenerOption func(*listenerConfig)
 
-// WithAddr sets the listen address (or Unix socket path) by calling fn at the
-// time the Option is applied, allowing the value to be sourced from a flag or
-// other late-bound configuration. WithAddr must be supplied to WithTCPListener
+// WithAddr sets the listen address (or Unix socket path) provider. fn is
+// stored and invoked lazily at Start time, allowing the value to be sourced
+// from a flag or other late-bound configuration that is not yet populated
+// when the Option is applied. WithAddr must be supplied to WithTCPListener
 // or WithUnixListener; omitting it leaves the address empty, which Start will
 // reject with an error.
 func WithAddr(fn func() string) ListenerOption {
 	return func(lc *listenerConfig) {
-		lc.addr = fn()
+		lc.addrFn = fn
 	}
 }
 
-// WithTLSCert enables TLS on the listener using the given certificate and key
-// files. Both paths must be non-empty; omitting this option leaves the
-// listener in plain-text mode.
-func WithTLSCert(certPath, keyPath string) ListenerOption {
+// WithTLSCert enables TLS on the listener using the certificate and key paths
+// returned by certFn and keyFn. Both providers are invoked lazily at Start
+// time; when either resolves to an empty string the listener stays in
+// plain-text mode.
+func WithTLSCert(certFn, keyFn func() string) ListenerOption {
 	return func(lc *listenerConfig) {
-		lc.tlsCertPath = certPath
-		lc.tlsKeyPath = keyPath
+		lc.tlsCertFn = certFn
+		lc.tlsKeyFn = keyFn
 	}
 }
 
 // WithMTLS enables mutual TLS on the listener, verifying client certificates
-// against the CA bundle at clientCAPath. The server certificate and key must
-// also be provided via WithTLSCert; mTLS has no effect on a plaintext listener.
-func WithMTLS(clientCAPath string) ListenerOption {
+// against the CA bundle whose path clientCAFn returns. clientCAFn is invoked
+// lazily at Start time. The server certificate and key must also be provided
+// via WithTLSCert; mTLS has no effect on a plaintext listener.
+func WithMTLS(clientCAFn func() string) ListenerOption {
 	return func(lc *listenerConfig) {
-		lc.clientCAPath = clientCAPath
+		lc.clientCAFn = clientCAFn
 	}
 }
 

@@ -38,6 +38,38 @@ func (h HTTPServer) RegisterRoute(api func(engine *gin.Engine)) {
 	api(h.engine)
 }
 
+// resolvedListener holds a listenerConfig with all lazy providers evaluated
+// into concrete strings. Providers are resolved exactly once at Start time,
+// after the viper configuration loader has populated flag values.
+type resolvedListener struct {
+	addr          string
+	network       string
+	tlsCertPath   string
+	tlsKeyPath    string
+	clientCAPath  string
+	tlsMinVersion uint16
+}
+
+// resolve evaluates lc's lazy providers into a resolvedListener. A nil
+// provider yields an empty string, preserving the plain-text / no-mTLS
+// behavior of an unset option.
+func resolve(lc listenerConfig) resolvedListener {
+	call := func(fn func() string) string {
+		if fn == nil {
+			return ""
+		}
+		return fn()
+	}
+	return resolvedListener{
+		addr:          call(lc.addrFn),
+		network:       lc.network,
+		tlsCertPath:   call(lc.tlsCertFn),
+		tlsKeyPath:    call(lc.tlsKeyFn),
+		clientCAPath:  call(lc.clientCAFn),
+		tlsMinVersion: lc.tlsMinVersion,
+	}
+}
+
 // Start starts the HTTP server(s) with graceful shutdown support.
 // When no listeners were provided at construction time, a single default
 // listener is derived from the registered flags via WithDefaultListener.
@@ -47,6 +79,13 @@ func (h HTTPServer) Start(ctx context.Context) (err error) {
 		o := &options{}
 		WithDefaultListener()(o)
 		listeners = o.listeners
+	}
+
+	// Resolve every listener's lazy providers exactly once, now that viper
+	// configuration has been loaded.
+	resolved := make([]resolvedListener, len(listeners))
+	for i, lc := range listeners {
+		resolved[i] = resolve(lc)
 	}
 
 	ginHandler := h.engine.Handler()
@@ -59,15 +98,15 @@ func (h HTTPServer) Start(ctx context.Context) (err error) {
 		ginHandler.ServeHTTP(w, r)
 	})
 
-	servers := make([]*http.Server, len(listeners))
-	for i, lc := range listeners {
-		if lc.addr == "" {
-			err = fmt.Errorf("listener %d (%s): %w", i, lc.network, ErrAddrMissing)
+	servers := make([]*http.Server, len(resolved))
+	for i, rl := range resolved {
+		if rl.addr == "" {
+			err = fmt.Errorf("listener %d (%s): %w", i, networkOf(rl), ErrAddrMissing)
 			return
 		}
 		srv := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second}
 		p := new(http.Protocols)
-		if lc.tlsCertPath != "" && lc.tlsKeyPath != "" {
+		if rl.tlsCertPath != "" && rl.tlsKeyPath != "" {
 			// TLS listener: HTTP/1.1 + HTTP/2 over TLS (standard ALPN negotiation).
 			p.SetHTTP1(true)
 			p.SetHTTP2(true)
@@ -82,11 +121,11 @@ func (h HTTPServer) Start(ctx context.Context) (err error) {
 
 	group, groupCtx := errgroup.WithContext(ctx)
 
-	// Start a listener goroutine per listenerConfig.
-	for i, lc := range listeners {
+	// Start a listener goroutine per resolved listener.
+	for i, rl := range resolved {
 		srv := servers[i]
 		group.Go(func() error {
-			return h.serveOne(srv, lc)
+			return h.serveOne(srv, rl)
 		})
 	}
 
@@ -96,8 +135,8 @@ func (h HTTPServer) Start(ctx context.Context) (err error) {
 		sc, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		for i, srv := range servers {
-			lc := listeners[i]
-			logger := h.logger.WithValues("addr", lc.addr, "network", networkOf(lc))
+			rl := resolved[i]
+			logger := h.logger.WithValues("addr", rl.addr, "network", networkOf(rl))
 			if shutErr := srv.Shutdown(sc); shutErr != nil {
 				logger.Error(shutErr, "shutdown failed")
 			} else {
@@ -116,13 +155,13 @@ func (h HTTPServer) NeedLeaderElection() bool {
 	return false
 }
 
-// serveOne opens a net.Listener for lc, wraps it in TLS when configured, and
+// serveOne opens a net.Listener for rl, wraps it in TLS when configured, and
 // runs srv until it is shut down. It returns nil on clean shutdown and a
 // non-nil error on unexpected serve failures.
-func (h HTTPServer) serveOne(srv *http.Server, lc listenerConfig) (err error) {
-	logger := h.logger.WithValues("addr", lc.addr, "network", networkOf(lc))
+func (h HTTPServer) serveOne(srv *http.Server, rl resolvedListener) (err error) {
+	logger := h.logger.WithValues("addr", rl.addr, "network", networkOf(rl))
 	var ln net.Listener
-	if ln, err = newListener(lc); err != nil {
+	if ln, err = newListener(rl); err != nil {
 		logger.Error(err, "listen failed")
 		return
 	}
@@ -131,9 +170,9 @@ func (h HTTPServer) serveOne(srv *http.Server, lc listenerConfig) (err error) {
 			logger.Error(closeErr, "close listener failed")
 		}
 	}()
-	if lc.tlsCertPath != "" && lc.tlsKeyPath != "" {
+	if rl.tlsCertPath != "" && rl.tlsKeyPath != "" {
 		var tlsCfg *tls.Config
-		tlsCfg, err = tlsConfig(lc)
+		tlsCfg, err = tlsConfig(rl)
 		if err != nil {
 			logger.Error(err, "load TLS config failed")
 			return
@@ -150,47 +189,47 @@ func (h HTTPServer) serveOne(srv *http.Server, lc listenerConfig) (err error) {
 	return
 }
 
-// newListener creates a net.Listener for the given listenerConfig.
-// Network defaults to "tcp" when lc.network is empty.
-func newListener(lc listenerConfig) (net.Listener, error) {
-	return net.Listen(networkOf(lc), lc.addr)
+// newListener creates a net.Listener for the given resolved listener.
+// Network defaults to "tcp" when rl.network is empty.
+func newListener(rl resolvedListener) (net.Listener, error) {
+	return net.Listen(networkOf(rl), rl.addr)
 }
 
-func networkOf(lc listenerConfig) string {
-	if lc.network != "" {
-		return lc.network
+func networkOf(rl resolvedListener) string {
+	if rl.network != "" {
+		return rl.network
 	}
 	return "tcp"
 }
 
-// tlsConfig loads the server certificate and key from lc and returns a
-// tls.Config. When lc.clientCAPath is set it additionally enables mutual TLS,
+// tlsConfig loads the server certificate and key from rl and returns a
+// tls.Config. When rl.clientCAPath is set it additionally enables mutual TLS,
 // requiring and verifying client certificates against that CA bundle. An
-// explicit lc.tlsMinVersion overrides the default minimum TLS version.
-func tlsConfig(lc listenerConfig) (cfg *tls.Config, err error) {
+// explicit rl.tlsMinVersion overrides the default minimum TLS version.
+func tlsConfig(rl resolvedListener) (cfg *tls.Config, err error) {
 	var cert tls.Certificate
-	cert, err = tls.LoadX509KeyPair(lc.tlsCertPath, lc.tlsKeyPath)
+	cert, err = tls.LoadX509KeyPair(rl.tlsCertPath, rl.tlsKeyPath)
 	if err != nil {
 		return
 	}
 	cfg = &tls.Config{Certificates: []tls.Certificate{cert}}
-	if lc.clientCAPath != "" {
+	if rl.clientCAPath != "" {
 		var caPEM []byte
-		if caPEM, err = os.ReadFile(lc.clientCAPath); err != nil {
-			err = fmt.Errorf("read client CA %q: %w", lc.clientCAPath, err)
+		if caPEM, err = os.ReadFile(rl.clientCAPath); err != nil {
+			err = fmt.Errorf("read client CA %q: %w", rl.clientCAPath, err)
 			return
 		}
 		pool := x509.NewCertPool()
 		if !pool.AppendCertsFromPEM(caPEM) {
-			err = fmt.Errorf("parse client CA from %q", lc.clientCAPath)
+			err = fmt.Errorf("parse client CA from %q", rl.clientCAPath)
 			return
 		}
 		cfg.ClientCAs = pool
 		cfg.ClientAuth = tls.RequireAndVerifyClientCert
 		cfg.MinVersion = tls.VersionTLS13 // mTLS branch only, does not affect the default listener
 	}
-	if lc.tlsMinVersion != 0 {
-		cfg.MinVersion = lc.tlsMinVersion
+	if rl.tlsMinVersion != 0 {
+		cfg.MinVersion = rl.tlsMinVersion
 	}
 	return
 }
