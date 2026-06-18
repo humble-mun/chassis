@@ -58,7 +58,7 @@ func TestControllerOptionsEnablesLeaderElection(t *testing.T) {
 	viper.Set(flagResyncPeriod, time.Minute)
 	viper.Set(flagDisableLeaderElection, false)
 	viper.Set(flagLeaderElectID, "test-manager")
-	viper.Set(flagLeaderElectNamespace, "chassis")
+	viper.Set(flagLeaderElectNamespace, "hm-system")
 
 	options := controllerOptions(logr.Discard(), runtime.NewScheme(), nil)
 	if !options.LeaderElection {
@@ -67,7 +67,7 @@ func TestControllerOptionsEnablesLeaderElection(t *testing.T) {
 	if options.LeaderElectionID != "test-manager" {
 		t.Fatalf("unexpected leader election id: %q", options.LeaderElectionID)
 	}
-	if options.LeaderElectionNamespace != "chassis" {
+	if options.LeaderElectionNamespace != "hm-system" {
 		t.Fatalf("unexpected leader election namespace: %q", options.LeaderElectionNamespace)
 	}
 	if !options.LeaderElectionReleaseOnCancel {

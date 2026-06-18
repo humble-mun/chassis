@@ -1,11 +1,6 @@
-package service
+package constants
 
 import "time"
-
-var (
-	// ConfigName is the default configuration file name, should be set by consumers
-	ConfigName string
-)
 
 const (
 	// FlagNodeName is the flag name for node name
@@ -16,6 +11,13 @@ const (
 	FlagControllerRequeueDuration = "requeue-duration"
 	// FlagGlobalResourceNamespace is the flag name for global resource namespace
 	FlagGlobalResourceNamespace = "global-resource-namespace"
+	// FlagInfraAPIToken is the flag name for the infrastructure API token guarding
+	// built-in endpoints such as /logging and /debug/pprof
+	//nolint:gosec // G101: this is the flag name, not a credential
+	FlagInfraAPIToken = "infra-api-token"
+	// FlagEnableDebugCORS is the flag name to enable a permissive CORS policy
+	// (allow all origins and credentials) for development and debugging
+	FlagEnableDebugCORS = "enable-debug-cors"
 
 	// DefaultHTTPServerBind is the default HTTP server bind address
 	DefaultHTTPServerBind = "0.0.0.0:8080"

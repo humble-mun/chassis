@@ -1,10 +1,10 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to AI agents when working with code in this repository.
 
 ## Project Overview
 
-chassis is a shared infrastructure toolkit for humble-mun microservices. It provides common building blocks that are reused across multiple services.
+chassis is a shared infrastructure toolkit for humble-mun microservices. It provides common building blocks that are consumed as a dependency by multiple humble-mun services running in production.
 
 **Go module**: `github.com/humble-mun/chassis`
 
@@ -12,44 +12,75 @@ chassis is a shared infrastructure toolkit for humble-mun microservices. It prov
 
 | Package | Purpose | Dependencies |
 |---------|---------|--------------|
-| `pkg/utils` | Leaf package: slice helpers, gin middleware, image/k8s name normalization, SSH, viper config, health probes, route groups | gin, viper, pflag, crypto/ssh |
+| `pkg/utils` | Leaf package: slice helpers, gin middleware, image/k8s name normalization, SSH, viper config, health probes, infra-token auth | gin, viper, pflag, crypto/ssh |
 | `pkg/logging` | Leaf package: klog initialization and logger factory | klog, logr, pflag |
-| `pkg/metrics` | Prometheus registry wrapper and /metrics endpoint | prometheus, gin, utils |
+| `pkg/metrics` | Prometheus registry wrapper, scrape hooks and /metrics endpoint | prometheus, gin, utils |
 | `pkg/version` | Build version info template | stdlib only |
-| `pkg/service` | Common infrastructure constants (flag names, defaults) | stdlib only |
-| `pkg/server` | HTTP/gRPC server with Gin: multi-listener (TCP + Unix socket), TLS per listener, CORS, H2C via standard library, graceful shutdown, request logging | gin, cors, grpc, errgroup, metrics, service, utils |
-| `pkg/manager` | controller-runtime manager bootstrap (flags, client QPS/burst, leader election, scheme registration) | controller-runtime, viper, pflag, logr, service |
-| `pkg/app` | Application bootstrap (PrepareFlags + BaseContext); BaseContext returns optional `*server.HTTPServer` and accepts functional options | all above packages, cobra, controller-runtime |
+| `pkg/constants` | Common infrastructure constants (flag names, defaults) | stdlib only |
+| `pkg/server` | HTTP/gRPC server with Gin: multi-listener (TCP + Unix socket), TLS/mTLS per listener, lazy listener resolution, CORS, H2C via standard library, graceful shutdown, request logging | gin, cors, grpc, errgroup, metrics, constants, utils, version |
+| `pkg/manager` | controller-runtime manager bootstrap (flags, client QPS/burst, leader election, scheme registration) | controller-runtime, viper, pflag, logr, constants |
+| `pkg/app` | Application bootstrap (PrepareFlags + BaseContext); BaseContext returns a `Base` struct (RootLogger, Logger, HTTPGin `*server.HTTPServer`, Ctx, NodeName) and accepts functional options | all above packages, cobra, controller-runtime |
 
 ### Internal Dependency Graph
 
 ```
-app --> logging, metrics, server, service, utils, version
-server --> metrics, service, utils
-manager --> service
+app --> logging, metrics, server, constants, utils, version
+server --> metrics, constants, utils, version
+manager --> constants
 metrics --> utils
 logging --> (none)
 version --> (none)
-service --> (none)
+constants --> (none)
 utils --> (none)
 ```
 
 ## Consumer Configuration
 
-Consumers should set these variables before calling `app.BaseContext()`:
+Consumers should set this variable before calling `app.BaseContext()`:
 
-- `version.Name` - application name (typically set via ldflags)
-- `service.ConfigName` - config file name for viper (set before PrepareFlags if needed)
+- `version.Name` - application name (typically set via ldflags); also used as the `component` label on the `http_failure` request-failure metric
 
 `BaseContext` accepts functional options:
 
 - `app.WithInit(fn)` - sets the viper initialization function returned by `PrepareFlags`
-- `app.WithoutHTTPServer()` - skips HTTP server construction and route registration; `BaseContext` returns `nil` for `httpGin`, and server-related options are ignored
 - `app.WithGRPCServer(s)` - attaches a gRPC server; requests with `Content-Type: application/grpc` are routed to it
-- `app.WithTCPListener(...ListenerOption)` - adds a TCP listener; use `server.WithAddr(fn)` to supply the bind address and `server.WithTLSCert(cert, key)` to enable TLS
+- `app.WithTCPListener(...ListenerOption)` - adds a TCP listener; use `server.WithAddr(fn)` to supply the bind address, `server.WithTLSCert(certFn, keyFn)` to enable TLS, `server.WithMTLS(clientCAFn)` to enable mTLS, and `server.WithTLSMinVersion(version)` to set the minimum TLS version
 - `app.WithUnixListener(...ListenerOption)` - adds a Unix domain socket listener; use `server.WithAddr(fn)` to supply the socket path
+- `app.WithoutHTTPServer()` - skips creation of the HTTP server; useful for services that only need a controller-runtime manager
 
-When HTTP server construction is enabled, `BaseContext` prepends `server.WithDefaultListener()` and `server.WithDefaultCORSConfig()` automatically, so flag-driven defaults are always active unless overridden.
+`BaseContext` prepends `server.WithDefaultListener()` and `server.WithDefaultCORSConfig()` automatically, so flag-driven defaults are always active unless overridden.
+
+## Conventions
+
+The following conventions are intentional and should be preserved or extended through options rather than duplicated in consumers.
+
+### klog replace
+
+`chassis` replaces `k8s.io/klog/v2` with `github.com/tedli/klog/v2` so that klog exposes a runtime HTTP API for changing log levels. This `replace` must be repeated in every downstream `go.mod` because Go ignores `replace` directives from dependencies. Do not try to remove the replace or rename the fork module path: indirect dependencies (`client-go`, `controller-runtime`) import `k8s.io/klog/v2` and their log output can only be tuned at runtime if the whole process resolves to the fork.
+
+### BaseContext is the single composition root
+
+Avoid creating a second viper instance, a second logger, or a second HTTP server in consumers. Extend `BaseContext` through options instead.
+
+### Configuration is a single viper global singleton
+
+All configuration flows through one process-global viper instance composed by `BaseContext`. Do not introduce additional config files or a second viper instance. The rule is deliberate: if a component accumulates so many options that it seems to need its own config file, that is a signal the component should be split, not that another config source should be added. For a complex nested config item, bind it to a single flag and unmarshal the sub-tree with `viper.UnmarshalKey`, e.g. `viper.UnmarshalKey("some-complex-config", &cfg)`, rather than reading a separate file.
+
+### Version information is process-global and for troubleshooting
+
+`pkg/version` exposes build metadata (`Name`, `CommitID`, `BuiltAt`, `Architecture`, `Variant`, `RecentCommits`) as package-level variables injected at compile time via ldflags. Like the viper singleton, these are process-global by design: if a service needs to track more than one version, that is a signal it is doing too much and should be split, not that `version` should grow per-component instances. The goal is production troubleshooting — letting an operator confirm whether a running binary contains a given change by inspecting the injected commit id and build time — not presenting a version to end users as a UI feature.
+
+### Registries are lock-free and immutable after startup
+
+`pkg/utils/health.go` stores liveness/readiness checks in a plain map without locks, and `pkg/metrics/metrics.go` stores scrape hooks in a plain slice without locks. Registration functions (`utils.RegisterLivenessCheck`, `utils.RegisterReadinessCheck`, `metrics.RegisterScrapeHook`) must be called before `mgr.Start(ctx)` and never mutated at runtime. Probe routes (`/healthz`, `/readyz`) must stay unauthenticated so Kubernetes probes do not fail.
+
+### Controller-runtime metric server and webhook server are not used
+
+Metrics are served through the shared Gin server (`/metrics`). Controller-runtime's metrics server is disabled (`BindAddress: "0"`). Webhooks reuse the same Gin server rather than controller-runtime's webhook server.
+
+### Infrastructure endpoints are opt-in authenticated
+
+`/logging` and `/debug/pprof` are protected by `--infra-api-token` when set. Empty token keeps them open for backward compatibility. `/metrics`, `/healthz`, and `/readyz` stay unauthenticated.
 
 ## Health Probes
 
@@ -69,6 +100,7 @@ Contract:
 - `ok=false` with `message` and `err==nil` means an expected probe failure.
 - `err!=nil` means the check itself hit an unexpected internal error.
 - Register all probe checks before `mgr.Start(ctx)`; runtime mutation of the global probe registry is not supported.
+
 ## Go Project Code Style
 
 Key rules:
@@ -102,8 +134,21 @@ go build -v -mod=vendor -o /dev/null ./...
 # Run tests
 go test -mod=vendor ./...
 
+# Run go vet
+go vet -mod=vendor ./...
+
 # Lint (when golangci-lint-v2 is available)
 golangci-lint-v2 run -c .golangci.yaml ./...
+```
+
+## Version Information
+
+Build with ldflags to populate `pkg/version`:
+
+```bash
+go build -mod=vendor \
+  -ldflags "-X 'github.com/humble-mun/chassis/pkg/version.Name=my-service' -X 'github.com/humble-mun/chassis/pkg/version.CommitID=$(git rev-parse --short HEAD)' -X 'github.com/humble-mun/chassis/pkg/version.BuiltAt=$(date -u +%Y-%m-%dT%H:%M:%SZ)'" \
+  -o ./bin/my-service ./cmd/my-service
 ```
 
 ## YAML Style
@@ -114,4 +159,8 @@ golangci-lint-v2 run -c .golangci.yaml ./...
 ## Dependencies
 
 - **Vendor mode**: use `go mod vendor` to manage dependencies
-- **klog replace**: `k8s.io/klog/v2 => github.com/tedli/klog/v2` (custom fork)
+- **klog replace**: `k8s.io/klog/v2 => github.com/tedli/klog/v2` (custom fork, required for runtime log-level tuning and must be repeated in downstream go.mod files)
+
+## License
+
+chassis is licensed under the Apache License 2.0. See `LICENSE` and `NOTICE`.

@@ -21,16 +21,17 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/humble-mun/chassis/pkg/metrics"
-	"github.com/humble-mun/chassis/pkg/service"
 	"github.com/humble-mun/chassis/pkg/utils"
+	"github.com/humble-mun/chassis/pkg/version"
 )
 
 // HTTPServer is an HTTP server implementation using the HTTPServer framework
 type HTTPServer struct {
-	logger    logr.Logger
-	engine    *gin.Engine
-	grpc      *grpc.Server
-	listeners []listenerConfig
+	logger            logr.Logger
+	engine            *gin.Engine
+	grpc              *grpc.Server
+	listeners         []listenerConfig
+	readHeaderTimeout time.Duration
 }
 
 // RegisterRoute registers custom routes with the Gin engine
@@ -81,6 +82,11 @@ func (h HTTPServer) Start(ctx context.Context) (err error) {
 		listeners = o.listeners
 	}
 
+	readHeaderTimeout := h.readHeaderTimeout
+	if readHeaderTimeout == 0 {
+		readHeaderTimeout = 5 * time.Second
+	}
+
 	// Resolve every listener's lazy providers exactly once, now that viper
 	// configuration has been loaded.
 	resolved := make([]resolvedListener, len(listeners))
@@ -104,7 +110,7 @@ func (h HTTPServer) Start(ctx context.Context) (err error) {
 			err = fmt.Errorf("listener %d (%s): %w", i, networkOf(rl), ErrAddrMissing)
 			return
 		}
-		srv := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second}
+		srv := &http.Server{Handler: handler, ReadHeaderTimeout: readHeaderTimeout}
 		p := new(http.Protocols)
 		if rl.tlsCertPath != "" && rl.tlsKeyPath != "" {
 			// TLS listener: HTTP/1.1 + HTTP/2 over TLS (standard ALPN negotiation).
@@ -270,7 +276,7 @@ func ginLogger(rootLogger logr.Logger) gin.HandlerFunc {
 			logErr = errors.Join(logErr, e)
 		}
 		if logErr != nil {
-			httpFailure.WithLabelValues(strconv.Itoa(statusCode), service.ConfigName).Inc()
+			httpFailure.WithLabelValues(strconv.Itoa(statusCode), version.Name).Inc()
 			if rawBody, exist := ctx.Get(gin.BodyBytesKey); exist {
 				if body, ok := rawBody.([]byte); ok {
 					logger.Error(logErr, "handle request failed",

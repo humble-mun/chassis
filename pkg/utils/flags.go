@@ -8,20 +8,67 @@ import (
 	"github.com/spf13/viper"
 )
 
-const (
-	envPrefix      = "HM"
-	configFileType = "yaml"
+const configFileType = "yaml"
+
+// envPrefix and configRoot are package-level variables so they can be
+// overridden at build time via the linker (-X), e.g.
+// -X 'github.com/humble-mun/chassis/pkg/utils.envPrefix=ACME'.
+// They are deliberately not const: the prefix and config root are the very
+// mechanism that resolves env vars, flags, and config files, so they cannot
+// be configured through those same sources without a chicken-and-egg problem.
+// Runtime overrides supplied via ViperOption take precedence over these.
+var (
+	envPrefix  = "HM"
+	configRoot = "/etc/humble-mun"
 )
 
-// RegisterToViper registers flags to viper and returns a function to load config
-func RegisterToViper(pfs *pflag.FlagSet, configName string) func() error {
-	return func() (err error) {
-		viper.SetConfigName(configName)
-		viper.SetConfigType(configFileType)
-		viper.AddConfigPath("/etc/humble-mun")
-		for _, configPath := range extraConfigPaths {
-			viper.AddConfigPath(configPath)
+// ViperOption overrides the env prefix or config root resolved by
+// RegisterToViper. A non-empty value takes precedence over the package-level
+// default (which may itself be injected at build time via ldflags).
+type ViperOption func(*viperConfig)
+
+type viperConfig struct {
+	envPrefix  string
+	configRoot string
+}
+
+// WithEnvPrefix overrides the environment variable prefix. An empty string is
+// ignored, leaving the package-level default (or ldflags-injected value) in
+// effect.
+func WithEnvPrefix(prefix string) ViperOption {
+	return func(c *viperConfig) {
+		if prefix != "" {
+			c.envPrefix = prefix
 		}
+	}
+}
+
+// WithConfigRoot overrides the primary config search directory. An empty
+// string is ignored, leaving the package-level default (or ldflags-injected
+// value) in effect.
+func WithConfigRoot(root string) ViperOption {
+	return func(c *viperConfig) {
+		if root != "" {
+			c.configRoot = root
+		}
+	}
+}
+
+// RegisterToViper registers flags to viper and returns a function to load config.
+// The env prefix and config root default to the package-level values (which may
+// be injected at build time via ldflags); ViperOptions override them at runtime.
+func RegisterToViper(pfs *pflag.FlagSet, configName string, opts ...ViperOption) func() error {
+	cfg := viperConfig{envPrefix: envPrefix, configRoot: configRoot}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	viper.SetConfigName(configName)
+	viper.SetConfigType(configFileType)
+	viper.AddConfigPath(cfg.configRoot)
+	for _, configPath := range extraConfigPaths {
+		viper.AddConfigPath(configPath)
+	}
+	return func() (err error) {
 		if err = viper.ReadInConfig(); err != nil {
 			if _, ok := errors.AsType[viper.ConfigFileNotFoundError](err); !ok {
 				return
@@ -29,7 +76,7 @@ func RegisterToViper(pfs *pflag.FlagSet, configName string) func() error {
 		} else {
 			viper.WatchConfig()
 		}
-		viper.SetEnvPrefix(envPrefix)
+		viper.SetEnvPrefix(cfg.envPrefix)
 		viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
 		viper.AutomaticEnv()
 		err = viper.BindPFlags(pfs)

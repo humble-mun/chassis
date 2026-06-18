@@ -16,7 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	"github.com/humble-mun/chassis/pkg/service"
+	"github.com/humble-mun/chassis/pkg/constants"
 )
 
 const (
@@ -39,7 +39,7 @@ func RegisterFlags(pfs *pflag.FlagSet) {
 	pfs.Int(flagClientBurst, defaultClientBurst, "The maximum burst for throttle.")
 	pfs.Duration(flagResyncPeriod, defaultResyncPeriod, "The base frequency the informers are resynced.")
 	pfs.Bool(flagDisableLeaderElection, false, "Disable leader election and let every replica run controllers concurrently.")
-	pfs.String(flagLeaderElectNamespace, service.DefaultGlobalResourceNamespace, "The namespace in which the leader election resource will be created.")
+	pfs.String(flagLeaderElectNamespace, constants.DefaultGlobalResourceNamespace, "The namespace in which the leader election resource will be created.")
 	pfs.String(flagLeaderElectID, defaultLeaderElectID, "The name of the resource that leader election will use for holding the leader lock.")
 }
 

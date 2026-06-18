@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"time"
 
 	"github.com/gin-contrib/cors"
 	"google.golang.org/grpc"
@@ -13,14 +14,6 @@ import (
 var ErrAddrMissing = errors.New("listener addr missing")
 
 // listenerConfig describes a single listen endpoint.
-// It is constructed exclusively via ListenerOption functions and is not
-// exported; callers use WithTCPListener or WithUnixListener instead.
-//
-// The addr/TLS path fields are stored as func() string providers rather than
-// plain strings so that their values are resolved lazily at Start time. This
-// matters because options are applied (in BaseContext) before the viper
-// configuration loader runs, so reading flag values eagerly here would yield
-// empty strings. Start resolves each provider once just before serving.
 type listenerConfig struct {
 	addrFn        func() string
 	network       string // "tcp" (default) or "unix"
@@ -81,15 +74,37 @@ func WithTLSMinVersion(version uint16) ListenerOption {
 type Option func(*options)
 
 type options struct {
-	grpc       *grpc.Server
-	listeners  []listenerConfig
-	corsConfig *cors.Config
+	grpc              *grpc.Server
+	listeners         []listenerConfig
+	corsConfig        *cors.Config
+	readHeaderTimeout time.Duration
 }
 
 // CORSOption adjusts a cors.Config before it is applied to the server.
 // Use with WithDefaultCORSConfig to override individual fields of the
 // default policy.
 type CORSOption func(*cors.Config)
+
+// WithCORSAllowAllOrigins relaxes the CORS policy to accept any origin and to
+// allow credentials. It is intended for development and debugging only; do not
+// enable it in production, where it would let any site make credentialed
+// cross-origin requests.
+func WithCORSAllowAllOrigins() CORSOption {
+	return func(cfg *cors.Config) {
+		cfg.AllowAllOrigins = true
+		cfg.AllowCredentials = true
+	}
+}
+
+// WithReadHeaderTimeout sets the http.Server ReadHeaderTimeout for every
+// listener. It bounds how long the server waits to read request headers,
+// mitigating slowloris-style attacks. When omitted (the zero value), Start
+// applies a default of 5 seconds.
+func WithReadHeaderTimeout(d time.Duration) Option {
+	return func(o *options) {
+		o.readHeaderTimeout = d
+	}
+}
 
 // WithGRPCServer attaches a gRPC server to the shared H2C handler.
 // Inbound requests whose Content-Type starts with "application/grpc"
