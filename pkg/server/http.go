@@ -3,12 +3,10 @@ package server
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +19,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/humble-mun/chassis/pkg/metrics"
+	tlsreload "github.com/humble-mun/chassis/pkg/tls"
 	"github.com/humble-mun/chassis/pkg/utils"
 	"github.com/humble-mun/chassis/pkg/version"
 )
@@ -178,7 +177,7 @@ func (h HTTPServer) serveOne(srv *http.Server, rl resolvedListener) (err error) 
 	}()
 	if rl.tlsCertPath != "" && rl.tlsKeyPath != "" {
 		var tlsCfg *tls.Config
-		tlsCfg, err = tlsConfig(rl)
+		tlsCfg, err = tlsConfig(logger, rl)
 		if err != nil {
 			logger.Error(err, "load TLS config failed")
 			return
@@ -212,13 +211,12 @@ func networkOf(rl resolvedListener) string {
 // tls.Config. When rl.clientCAPath is set it additionally enables mutual TLS,
 // requiring and verifying client certificates against that CA bundle. An
 // explicit rl.tlsMinVersion overrides the default minimum TLS version.
-func tlsConfig(rl resolvedListener) (cfg *tls.Config, err error) {
-	var cert tls.Certificate
-	cert, err = tls.LoadX509KeyPair(rl.tlsCertPath, rl.tlsKeyPath)
+func tlsConfig(logger logr.Logger, rl resolvedListener) (cfg *tls.Config, err error) {
+	certReloader, err := tlsreload.NewCertReloader(logger, rl.tlsCertPath, rl.tlsKeyPath)
 	if err != nil {
 		return
 	}
-	cfg = &tls.Config{Certificates: []tls.Certificate{cert}}
+	cfg = &tls.Config{GetCertificate: certReloader.GetCertificate}
 	// Advertise ALPN protocols so HTTP/2 (and thus gRPC) can be negotiated over
 	// TLS. The Go http2 server only injects "h2" automatically when it builds the
 	// TLS listener itself; here we wrap the listener with our own tls.Config, so we
@@ -227,17 +225,12 @@ func tlsConfig(rl resolvedListener) (cfg *tls.Config, err error) {
 	// "http/1.1" is kept as a fallback so plain REST/Gin traffic still works.
 	cfg.NextProtos = []string{"h2", "http/1.1"}
 	if rl.clientCAPath != "" {
-		var caPEM []byte
-		if caPEM, err = os.ReadFile(rl.clientCAPath); err != nil {
-			err = fmt.Errorf("read client CA %q: %w", rl.clientCAPath, err)
+		var caReloader *tlsreload.CAReloader
+		caReloader, err = tlsreload.NewCAReloader(logger, rl.clientCAPath)
+		if err != nil {
 			return
 		}
-		pool := x509.NewCertPool()
-		if !pool.AppendCertsFromPEM(caPEM) {
-			err = fmt.Errorf("parse client CA from %q", rl.clientCAPath)
-			return
-		}
-		cfg.ClientCAs = pool
+		cfg.ClientCAs = caReloader.CurrentPool()
 		cfg.ClientAuth = tls.RequireAndVerifyClientCert
 		cfg.MinVersion = tls.VersionTLS13 // mTLS branch only, does not affect the default listener
 	}

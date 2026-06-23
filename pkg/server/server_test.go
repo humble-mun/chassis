@@ -221,12 +221,12 @@ func TestTLSConfig(t *testing.T) {
 	certPath, keyPath := writeSelfSignedCert(t)
 
 	t.Run("server cert only", func(t *testing.T) {
-		cfg, err := tlsConfig(resolvedListener{tlsCertPath: certPath, tlsKeyPath: keyPath})
+		cfg, err := tlsConfig(logr.Discard(), resolvedListener{tlsCertPath: certPath, tlsKeyPath: keyPath})
 		if err != nil {
 			t.Fatalf("tlsConfig error: %v", err)
 		}
-		if len(cfg.Certificates) != 1 {
-			t.Fatalf("expected 1 certificate, got %d", len(cfg.Certificates))
+		if cfg.GetCertificate == nil {
+			t.Fatal("expected GetCertificate to be set")
 		}
 		wantProtos := []string{"h2", "http/1.1"}
 		if len(cfg.NextProtos) != len(wantProtos) {
@@ -238,7 +238,7 @@ func TestTLSConfig(t *testing.T) {
 	})
 
 	t.Run("mTLS enables client verification", func(t *testing.T) {
-		cfg, err := tlsConfig(resolvedListener{
+		cfg, err := tlsConfig(logr.Discard(), resolvedListener{
 			tlsCertPath:  certPath,
 			tlsKeyPath:   keyPath,
 			clientCAPath: certPath,
@@ -258,7 +258,7 @@ func TestTLSConfig(t *testing.T) {
 	})
 
 	t.Run("explicit min version override", func(t *testing.T) {
-		cfg, err := tlsConfig(resolvedListener{
+		cfg, err := tlsConfig(logr.Discard(), resolvedListener{
 			tlsCertPath:   certPath,
 			tlsKeyPath:    keyPath,
 			tlsMinVersion: tls.VersionTLS12,
@@ -272,7 +272,7 @@ func TestTLSConfig(t *testing.T) {
 	})
 
 	t.Run("missing cert file", func(t *testing.T) {
-		_, err := tlsConfig(resolvedListener{
+		_, err := tlsConfig(logr.Discard(), resolvedListener{
 			tlsCertPath: filepath.Join(t.TempDir(), "missing.crt"),
 			tlsKeyPath:  keyPath,
 		})
@@ -282,7 +282,7 @@ func TestTLSConfig(t *testing.T) {
 	})
 
 	t.Run("missing client CA file", func(t *testing.T) {
-		_, err := tlsConfig(resolvedListener{
+		_, err := tlsConfig(logr.Discard(), resolvedListener{
 			tlsCertPath:  certPath,
 			tlsKeyPath:   keyPath,
 			clientCAPath: filepath.Join(t.TempDir(), "missing-ca.crt"),

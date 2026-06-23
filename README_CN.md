@@ -19,13 +19,14 @@ Go 模块：`github.com/humble-mun/chassis`
 | 包 | 用途 |
 |---------|---------|
 | `pkg/app` | 应用引导：`PrepareFlags` + `BaseContext`，以及用于监听器和 gRPC 的函数式选项 |
-| `pkg/server` | 基于 Gin 的多监听器 HTTP/gRPC 服务器，支持 TLS、mTLS、H2C、CORS 与优雅关停 |
+| `pkg/server` | 基于 Gin 的多监听器 HTTP/gRPC 服务器，支持 TLS、mTLS、H2C、CORS 与优雅关停；TLS 证书与客户端 CA 包在轮换时热重载（无需重启） |
 | `pkg/metrics` | Prometheus 注册表封装、`/metrics` 端点以及可选的抓取钩子 |
 | `pkg/manager` | controller-runtime 管理器引导 |
 | `pkg/logging` | klog 初始化与 `logr.Logger` 工厂 |
 | `pkg/utils` | 叶子辅助包：切片中间件、镜像/k8s 名称规范化、SSH、viper flag、探针、infra-token 认证 |
 | `pkg/constants` | 通用 flag 名称与默认值 |
 | `pkg/version` | 由 ldflags 注入的构建/版本模板 |
+| `pkg/tls` | 热重载 TLS 构件：`CertReloader`（服务端证书）与 `CAReloader`（客户端 CA 包），在轮换时从磁盘重新加载，用作 `crypto/tls.Config` 回调（仅支持 unix 与 Windows） |
 
 ## 快速开始
 

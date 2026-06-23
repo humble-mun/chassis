@@ -19,13 +19,14 @@ That said, feature requests and suggestions are very welcome. The toolkit grew o
 | Package | Purpose |
 |---------|---------|
 | `pkg/app` | Application bootstrap: `PrepareFlags` + `BaseContext`, functional options for listeners and gRPC |
-| `pkg/server` | Multi-listener HTTP/gRPC server with Gin, TLS, mTLS, H2C, CORS and graceful shutdown |
+| `pkg/server` | Multi-listener HTTP/gRPC server with Gin, TLS, mTLS, H2C, CORS and graceful shutdown; TLS certs and client-CA bundles hot-reload on rotation (no restart) |
 | `pkg/metrics` | Prometheus registry wrapper, `/metrics` endpoint and optional scrape hooks |
 | `pkg/manager` | controller-runtime manager bootstrap |
 | `pkg/logging` | klog initialization and `logr.Logger` factory |
 | `pkg/utils` | Leaf helpers: slice middleware, image/k8s name normalization, SSH, viper flags, probes, infra-token auth |
 | `pkg/constants` | Common flag names and defaults |
 | `pkg/version` | Build/version template populated by ldflags |
+| `pkg/tls` | Hot-reloading TLS building blocks: `CertReloader` (server cert) and `CAReloader` (client-CA bundle), reloaded from disk on rotation for use as `crypto/tls.Config` callbacks (unix and Windows only) |
 
 ## Quick start
 

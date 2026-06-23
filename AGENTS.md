@@ -17,7 +17,8 @@ chassis is a shared infrastructure toolkit for humble-mun microservices. It prov
 | `pkg/metrics` | Prometheus registry wrapper, scrape hooks and /metrics endpoint | prometheus, gin, utils |
 | `pkg/version` | Build version info template | stdlib only |
 | `pkg/constants` | Common infrastructure constants (flag names, defaults) | stdlib only |
-| `pkg/server` | HTTP/gRPC server with Gin: multi-listener (TCP + Unix socket), TLS/mTLS per listener, lazy listener resolution, CORS, H2C via standard library, graceful shutdown, request logging | gin, cors, grpc, errgroup, metrics, constants, utils, version |
+| `pkg/tls` | Leaf-ish package: hot-reloading TLS helpers — `CertReloader` (server cert via `GetCertificate`) and `CAReloader` (client-CA bundle via `CurrentPool`/`ConfigForClient`), with a generic `reloader[T]` base that detects file rotation by inode (size+modTime fallback) and falls back to the last good material on a bad reload. Supported on unix and Windows only; constructing a reloader on any other GOOS (plan9, js/wasm, wasip1) panics | crypto/tls, crypto/x509, logr |
+| `pkg/server` | HTTP/gRPC server with Gin: multi-listener (TCP + Unix socket), TLS/mTLS per listener, lazy listener resolution, CORS, H2C via standard library, graceful shutdown, request logging; server certs and client-CA bundles hot-reload on rotation without restart (via `pkg/tls`) | gin, cors, grpc, errgroup, metrics, constants, utils, version, tls |
 | `pkg/manager` | controller-runtime manager bootstrap (flags, client QPS/burst, leader election, scheme registration) | controller-runtime, viper, pflag, logr, constants |
 | `pkg/app` | Application bootstrap (PrepareFlags + BaseContext); BaseContext returns a `Base` struct (RootLogger, Logger, HTTPGin `*server.HTTPServer`, Ctx, NodeName) and accepts functional options | all above packages, cobra, controller-runtime |
 
@@ -25,12 +26,13 @@ chassis is a shared infrastructure toolkit for humble-mun microservices. It prov
 
 ```
 app --> logging, metrics, server, constants, utils, version
-server --> metrics, constants, utils, version
+server --> metrics, constants, utils, version, tls
 manager --> constants
 metrics --> utils
 logging --> (none)
 version --> (none)
 constants --> (none)
+tls --> (none)
 utils --> (none)
 ```
 
