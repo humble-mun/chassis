@@ -62,13 +62,20 @@ func RegisterToViper(pfs *pflag.FlagSet, configName string, opts ...ViperOption)
 	for _, opt := range opts {
 		opt(&cfg)
 	}
-	viper.SetConfigName(configName)
-	viper.SetConfigType(configFileType)
-	viper.AddConfigPath(cfg.configRoot)
-	for _, configPath := range extraConfigPaths {
-		viper.AddConfigPath(configPath)
-	}
 	return func() (err error) {
+		// Apply the config name/type/search paths here in the loader rather
+		// than eagerly at registration time. A binary with multiple cobra
+		// subcommands calls RegisterToViper once per command, all sharing the
+		// global viper; setting the config name eagerly lets the last
+		// registration clobber the others, so a command's loader would read
+		// the wrong file. Deferring to the loader means each command applies
+		// its own config name immediately before ReadInConfig.
+		viper.SetConfigName(configName)
+		viper.SetConfigType(configFileType)
+		viper.AddConfigPath(cfg.configRoot)
+		for _, configPath := range extraConfigPaths {
+			viper.AddConfigPath(configPath)
+		}
 		if err = viper.ReadInConfig(); err != nil {
 			if _, ok := errors.AsType[viper.ConfigFileNotFoundError](err); !ok {
 				return
