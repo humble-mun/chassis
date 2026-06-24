@@ -230,7 +230,10 @@ func tlsConfig(logger logr.Logger, rl resolvedListener) (cfg *tls.Config, err er
 		if err != nil {
 			return
 		}
-		cfg.ClientCAs = caReloader.CurrentPool()
+		// Stamp the current CA pool per connection via GetConfigForClient so an
+		// agent-CA rotation (e.g. cert-manager) takes effect on the next handshake
+		// instead of being frozen at startup.
+		cfg.GetConfigForClient = caReloader.ConfigForClient(cfg)
 		cfg.ClientAuth = tls.RequireAndVerifyClientCert
 		cfg.MinVersion = tls.VersionTLS13 // mTLS branch only, does not affect the default listener
 	}
