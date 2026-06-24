@@ -226,7 +226,10 @@ func TestTLSConfig(t *testing.T) {
 			t.Fatalf("tlsConfig error: %v", err)
 		}
 		if cfg.GetCertificate == nil {
-			t.Fatal("expected GetCertificate to be set")
+			t.Fatal("expected GetCertificate callback to be set")
+		}
+		if crt, gcErr := cfg.GetCertificate(&tls.ClientHelloInfo{}); gcErr != nil || crt == nil {
+			t.Fatalf("GetCertificate returned (%v, %v), want a certificate", crt, gcErr)
 		}
 		wantProtos := []string{"h2", "http/1.1"}
 		if len(cfg.NextProtos) != len(wantProtos) {

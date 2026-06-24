@@ -207,10 +207,14 @@ func networkOf(rl resolvedListener) string {
 	return "tcp"
 }
 
-// tlsConfig loads the server certificate and key from rl and returns a
-// tls.Config. When rl.clientCAPath is set it additionally enables mutual TLS,
-// requiring and verifying client certificates against that CA bundle. An
-// explicit rl.tlsMinVersion overrides the default minimum TLS version.
+// tlsConfig returns a tls.Config whose server certificate is served by a
+// pkg/tls CertReloader: the cert/key are loaded from rl up front (failing fast
+// on a bad path) and transparently reloaded on the next handshake after the
+// files are rotated on disk, so cert-manager renewals take effect without a restart.
+// When rl.clientCAPath is set it additionally enables mutual TLS, requiring and
+// verifying client certificates against that CA bundle, which is likewise
+// reloaded on rotation (via GetConfigForClient) without a restart. An explicit
+// rl.tlsMinVersion overrides the default minimum TLS version.
 func tlsConfig(logger logr.Logger, rl resolvedListener) (cfg *tls.Config, err error) {
 	certReloader, err := tlsreload.NewCertReloader(logger, rl.tlsCertPath, rl.tlsKeyPath)
 	if err != nil {
@@ -230,12 +234,13 @@ func tlsConfig(logger logr.Logger, rl resolvedListener) (cfg *tls.Config, err er
 		if err != nil {
 			return
 		}
-		// Stamp the current CA pool per connection via GetConfigForClient so an
-		// agent-CA rotation (e.g. cert-manager) takes effect on the next handshake
-		// instead of being frozen at startup.
-		cfg.GetConfigForClient = caReloader.ConfigForClient(cfg)
 		cfg.ClientAuth = tls.RequireAndVerifyClientCert
 		cfg.MinVersion = tls.VersionTLS13 // mTLS branch only, does not affect the default listener
+		// Seed ClientCAs so the base config is self-consistent, but the value
+		// served per handshake comes from GetConfigForClient below, which picks
+		// up rotations of the CA bundle without a restart.
+		cfg.ClientCAs = caReloader.CurrentPool()
+		cfg.GetConfigForClient = caReloader.ConfigForClient(cfg)
 	}
 	if rl.tlsMinVersion != 0 {
 		cfg.MinVersion = rl.tlsMinVersion
