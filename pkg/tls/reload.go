@@ -20,7 +20,7 @@ import (
 // modTime are kept as a portable fallback for filesystems or platforms that do
 // not expose a usable inode (inode == 0).
 type fileInfo struct {
-	inode   uint64
+	inode   uint64 //nolint:unused // only assigned on unix; sameInfos compares whole structs, so windows builds never name this field
 	size    int64
 	modTime int64 // UnixNano
 }
